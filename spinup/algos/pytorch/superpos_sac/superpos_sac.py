@@ -3,10 +3,13 @@ import itertools
 import numpy as np
 import torch
 from torch.optim import Adam
+import torch.nn as nn
 import gym
 import time
-import spinup.algos.pytorch.sac.core as core
+import spinup.algos.pytorch.superpos_sac.core as core
 from spinup.utils.logx import EpochLogger
+from torch.utils.tensorboard import SummaryWriter
+
 
 
 class ReplayBuffer:
@@ -38,11 +41,11 @@ class ReplayBuffer:
                      act=self.act_buf[idxs],
                      rew=self.rew_buf[idxs],
                      done=self.done_buf[idxs])
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
+        return {k: torch.as_tensor(v, dtype=torch.float32).cuda() for k,v in batch.items()}
 
 
 
-def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
+def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
@@ -54,6 +57,9 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     Args:
         env_fn : A function which creates a copy of the environment.
             The environment must satisfy the OpenAI Gym API.
+
+
+        num_tasks: The number of tasks for the env in env_fn
 
         actor_critic: The constructor method for a PyTorch Module with an ``act`` 
             method, a ``pi`` module, a ``q1`` module, and a ``q2`` module.
@@ -158,13 +164,13 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     act_limit = env.action_space.high[0]
 
     # Create actor-critic module and target networks
-    ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
-    ac_targ = deepcopy(ac)
+    ac = actor_critic(num_tasks, env.observation_space, env.action_space, psp_type, **ac_kwargs).cuda()
+    ac_targ = deepcopy(ac).cuda()
 
     # Freeze target networks with respect to optimizers (only update via polyak averaging)
     for p in ac_targ.parameters():
         p.requires_grad = False
-        
+
     # List of parameters for both Q-networks (save this for convenience)
     q_params = itertools.chain(ac.q1.parameters(), ac.q2.parameters())
 
@@ -172,8 +178,12 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
 
     # Count variables (protip: try to get a feel for how different size networks behave!)
-    var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q1, ac.q2])
-    logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d\n'%var_counts)
+    if psp_type == 'Proposed':
+        var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q1, ac.q2, ac.context_gen])
+        logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d \t context_gen: %d\n'%var_counts)
+    else:
+        var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q1, ac.q2])
+        logger.log('\nNumber of parameters: \t pi: %d, \t q1: %d, \t q2: %d\n'%var_counts)
 
     # Set up function for computing SAC Q-losses
     def compute_loss_q(data):
@@ -185,7 +195,11 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         # Bellman backup for Q functions
         with torch.no_grad():
             # Target actions come from *current* policy
-            a2, logp_a2 = ac.pi(o2)
+            if psp_type == 'Proposed':
+                context_map = ac.context_gen(o)
+                a2, logp_a2 = ac.pi(o2, context=context_map['Pi'])
+            else:
+                a2, logp_a2 = ac.pi(o2)
 
             # Target Q-values
             q1_pi_targ = ac_targ.q1(o2, a2)
@@ -199,15 +213,19 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_q = loss_q1 + loss_q2
 
         # Useful info for logging
-        q_info = dict(Q1Vals=q1.detach().numpy(),
-                      Q2Vals=q2.detach().numpy())
+        q_info = dict(Q1Vals=q1.cpu().detach().numpy(),
+                      Q2Vals=q2.cpu().detach().numpy())
 
         return loss_q, q_info
 
     # Set up function for computing SAC pi loss
     def compute_loss_pi(data):
         o = data['obs']
-        pi, logp_pi = ac.pi(o)
+        if psp_type == 'Proposed':
+            context_map = ac.context_gen(o)
+            pi, logp_pi = ac.pi(o, context=context_map['Pi'])
+        else:
+            pi, logp_pi = ac.pi(o)
         q1_pi = ac.q1(o, pi)
         q2_pi = ac.q2(o, pi)
         q_pi = torch.min(q1_pi, q2_pi)
@@ -216,13 +234,17 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_pi = (alpha * logp_pi - q_pi).mean()
 
         # Useful info for logging
-        pi_info = dict(LogPi=logp_pi.detach().numpy())
+        pi_info = dict(LogPi=logp_pi.cpu().detach().numpy())
 
         return loss_pi, pi_info
 
     # Set up optimizers for policy and q-function
-    pi_optimizer = Adam(ac.pi.parameters(), lr=lr)
-    q_optimizer = Adam(q_params, lr=lr)
+    if psp_type == 'Proposed':
+        pi_optimizer = Adam(list(ac.pi.parameters()) + list(ac.context_gen.parameters()), lr=lr)
+        q_optimizer = Adam(q_params, lr=lr)
+    else:
+        pi_optimizer = Adam(ac.pi.parameters(), lr=lr)
+        q_optimizer = Adam(q_params, lr=lr)
 
     # Set up model saving
     logger.setup_pytorch_saver(ac)
@@ -264,7 +286,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 p_targ.data.add_((1 - polyak) * p.data)
 
     def get_action(o, deterministic=False):
-        return ac.act(torch.as_tensor(o, dtype=torch.float32), 
+        return ac.act(torch.as_tensor(o, dtype=torch.float32).cuda(), 
                       deterministic)
 
     def test_agent():
@@ -291,6 +313,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     total_steps = steps_per_epoch * epochs
     start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
+    writer = SummaryWriter(logger.output_dir)
 
     # Main loop: collect experience in env and update/log each epoch
     for t in range(total_steps):
@@ -362,6 +385,19 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.log_tabular('LossQ', average_only=True)
             logger.log_tabular('Time', time.time()-start_time)
             logger.dump_tabular()
+            # write context distribution info
+            def write_context_info(module_list: nn.ModuleList, name):
+                for module in module_list:
+                    if hasattr(module, "o"):
+                        for task in range(num_tasks):
+                            writer.add_histogram(str(task) + "/" + name, module.o[task].cpu().detach().cpu().numpy(), global_step=t)
+            if epoch % 10 == 0:
+                write_context_info(ac.pi.net, "pi")
+                write_context_info(ac.q1.q, "q1")
+                write_context_info(ac.q2.q, "q2")
+    writer.close()
+
+
 
 if __name__ == '__main__':
     import argparse
@@ -373,6 +409,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', '-s', type=int, default=0)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--exp_name', type=str, default='sac')
+    parser.add_argument('--psp_type', type=str, default='Rand')
     args = parser.parse_args()
 
     from spinup.utils.run_utils import setup_logger_kwargs
@@ -380,7 +417,7 @@ if __name__ == '__main__':
 
     torch.set_num_threads(torch.get_num_threads())
 
-    sac(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic,
+    sac(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic, psp_type=args.psp_type,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
         gamma=args.gamma, seed=args.seed, epochs=args.epochs,
         logger_kwargs=logger_kwargs)
