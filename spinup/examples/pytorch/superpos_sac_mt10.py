@@ -3,25 +3,30 @@ from spinup import psp_sac_pytorch
 import torch
 import gym
 
+TASK_HORIZON = 200
+NUM_TASKS = 10
+PATHS_PER_TASK = 3
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--cpu', type=int, default=4)
     parser.add_argument('--num_runs', type=int, default=1)
     parser.add_argument('--psp_type', type=str, default='Rand', help='Rand, Ones, Binary, Proposed, Sanity')
-    parser.add_argument('--hidden_sizes', type=int, nargs='+', default=(400, 400))
+    parser.add_argument('--hidden_sizes', type=int, nargs='+', default=(160, 160, 160, 160, 160))
     args = parser.parse_args()
     hidden_sizes_name = '_'.join([str(num) for num in args.hidden_sizes])
     eg = ExperimentGrid(name='superpos_sac-MT10_with_bias_%s_context_q_%s' % (args.psp_type, hidden_sizes_name))
     eg.add('env_name', 'MT10Helper-v0', '', True)
     eg.add('num_tasks', 10)
+    eg.add('batch_size', 128 * NUM_TASKS)
     eg.add('psp_type', args.psp_type)
     eg.add('seed', [10*i for i in range(args.num_runs)])
-    eg.add('epochs', 3000)
-    eg.add('steps_per_epoch', 10 * 150)
+    eg.add('epochs', 300)
+    eg.add('steps_per_epoch', TASK_HORIZON * PATHS_PER_TASK * NUM_TASKS) 
     eg.add('lr', [3e-4])
     eg.add('start_steps', 1000)
-    eg.add('num_test_episodes', 50)
+    #eg.add('update_every', NUM_TASKS * )
+    eg.add('num_test_episodes', 10 * NUM_TASKS)
     eg.add('ac_kwargs:hidden_sizes', [tuple(args.hidden_sizes)], 'hid')
     eg.add('ac_kwargs:activation', [torch.nn.ReLU], '')
     eg.run(psp_sac_pytorch, num_cpu=args.cpu)

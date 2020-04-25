@@ -3,6 +3,9 @@ from spinup import sac_pytorch
 import torch
 import gym
 
+TASK_HORIZON = 200
+NUM_TASKS = 10
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
@@ -12,9 +15,10 @@ if __name__ == '__main__':
 
     eg = ExperimentGrid(name='sac-MT10')
     eg.add('env_name', 'MT10Helper-v0', '', True)
+    eg.add('num_tasks', [10])
     eg.add('seed', [10*i for i in range(args.num_runs)])
     eg.add('epochs', 1000)
-    eg.add('steps_per_epoch', 10 * 150)
+    eg.add('steps_per_epoch', TASK_HORIZON * NUM_TASKS) 
     eg.add('lr', [3e-4])
     eg.add('start_steps', 1000)
     eg.add('ac_kwargs:hidden_sizes', [(400,400)], 'hid')

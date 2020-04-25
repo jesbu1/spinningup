@@ -91,21 +91,21 @@ class SanityCheckLinear(HashLinear):
         self.o = nn.Parameter(o)
         self.o.requires_grad = False
 
-class ProposedContextLinear(nn.Linear):
-    """
-    This takes in a context vector proposed by another network
-    """
-    def __init__(self, n_in, n_out, num_tasks=None): #numtasks not used
-        super(ProposedContextLinear, self).__init__(n_in, n_out)
-        w = nn.init.xavier_normal_(torch.empty(n_in, n_out))
-        self.w = nn.Parameter(w)
-        self.bias = nn.Parameter(torch.zeros(n_out))
-        self.o = None
-
-    def forward(self, x, context):
-        m = x * context
-        r = torch.mm(m, self.w) + self.bias
-        return r
+#class ProposedContextLinear(nn.Linear):
+#    """
+#    This takes in a context vector proposed by another network
+#    """
+#    def __init__(self, n_in, n_out, num_tasks=None): #numtasks not used
+#        super(ProposedContextLinear, self).__init__(n_in, n_out)
+#        w = nn.init.xavier_normal_(torch.empty(n_in, n_out))
+#        self.w = nn.Parameter(w)
+#        self.bias = nn.Parameter(torch.zeros(n_out))
+#        self.o = None
+#
+#    def forward(self, x, context):
+#        m = x * context
+#        r = torch.mm(m, self.w) + self.bias
+#        return r
 
 def combined_shape(length, shape=None):
     if shape is None:
@@ -140,8 +140,8 @@ def select_linear_layer(psp_type: str):
         linear_layer = RandHashLinear
     elif psp_type == 'Binary':
         linear_layer = BinaryHashLinear
-    elif psp_type == 'Proposed':
-        linear_layer = ProposedContextLinear
+    #elif psp_type == 'Proposed':
+    #    linear_layer = ProposedContextLinear
     elif psp_type == 'Sanity':
         linear_layer = SanityCheckLinear
     return linear_layer
@@ -273,10 +273,10 @@ class MLPActorCritic(nn.Module):
         self.q1 = MLPQFunction(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation, psp_type)
         self.q2 = MLPQFunction(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation, psp_type)
 
-        # build context proposal function
-        self.psp_type = psp_type
-        if psp_type == 'Proposed':
-            self.context_gen = ContextGenerator(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation)
+        ## build context proposal function
+        #self.psp_type = psp_type
+        #if psp_type == 'Proposed':
+        #    self.context_gen = ContextGenerator(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation)
 
     def act(self, obs, deterministic=False):
         with torch.no_grad():
