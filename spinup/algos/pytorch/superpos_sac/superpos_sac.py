@@ -46,33 +46,33 @@ class ReplayBuffer:
 
 class MultiTaskReplayBuffer(ReplayBuffer):
     def __init__(self, obs_dim, act_dim, size, num_tasks):
-        self.obs_buf = np.zeros(core.combined_shape(num_tasks, size, obs_dim), dtype=np.float32)
-        self.obs2_buf = np.zeros(core.combined_shape(num_tasks, size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(core.combined_shape(num_tasks, size, act_dim), dtype=np.float32)
-        self.rew_buf = np.zeros(core.combined_shape(num_tasks, size), dtype=np.float32)
-        self.done_buf = np.zeros(core.combined_shape(num_tasks, size), dtype=np.float32)
-        self.ptr = np.zeros(core.combined_shape(num_tasks), dtype=np.int32)
+        self.obs_buf = torch.zeros(core.combined_shape(num_tasks, size, obs_dim), dtype=torch.float32)
+        self.obs2_buf = torch.zeros(core.combined_shape(num_tasks, size, obs_dim), dtype=torch.float32)
+        self.act_buf = torch.zeros(core.combined_shape(num_tasks, size, act_dim), dtype=torch.float32)
+        self.rew_buf = torch.zeros(core.combined_shape(num_tasks, size), dtype=torch.float32)
+        self.done_buf = torch.zeros(core.combined_shape(num_tasks, size), dtype=torch.float32)
+        self.ptr = torch.zeros(core.combined_shape(num_tasks), dtype=torch.int32)
         self.size, self.max_size = 0, size * num_tasks
+        self.num_tasks = num_tasks
 
     def store(self, obs, act, rew, next_obs, done, task):
-        self.obs_buf[task, self.ptr] = obs
-        self.obs2_buf[task, self.ptr] = next_obs
-        self.act_buf[task, self.ptr] = act
-        self.rew_buf[task, self.ptr] = rew
-        self.done_buf[task, self.ptr] = done
+        self.obs_buf[task, self.ptr] = torch.from_numpy(obs)
+        self.obs2_buf[task, self.ptr] = torch.from_numpy(next_obs)
+        self.act_buf[task, self.ptr] = torch.from_numpy(act)
+        self.rew_buf[task, self.ptr] = torch.from_numpy(rew)
+        self.done_buf[task, self.ptr] = torch.from_numpy(done)
         self.ptr[task] = (self.ptr[task] + 1) % self.max_size
         self.size = min(self.size+1, self.max_size)
-
+    
     def sample_batch(self, batch_size=32):
+        # Returns a (batch_size * num_tasks) x dim dict of tensors
         idxs = np.random.randint(0, self.size, size=batch_size)
-        batch = dict(obs=self.obs_buf[..., idxs],
-                     obs2=self.obs2_buf[..., idxs],
-                     act=self.act_buf[..., idxs],
-                     rew=self.rew_buf[..., idxs],
-                     done=self.done_buf[..., idxs])
-        return {k: torch.as_tensor(v, dtype=torch.float32).cuda() for k,v in batch.items()}
-
-
+        batch = dict(obs=self.obs_buf[:, idxs],
+                     obs2=self.obs2_buf[:, idxs],
+                     act=self.act_buf[:, idxs],
+                     rew=self.rew_buf[:, idxs],
+                     done=self.done_buf[:, idxs])
+        return {k: v.view(self.num_tasks * batch_size, -1).cuda() for k,v in batch.items()}
 
 def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
@@ -81,7 +81,6 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         logger_kwargs=dict(), save_freq=100):
     """
     Soft Actor-Critic (SAC)
-
 
     Args:
         env_fn : A function which creates a copy of the environment.
@@ -293,7 +292,13 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         q_optimizer = Adam(q_params, lr=lr)
 
     # Set up model saving
-    logger.setup_pytorch_saver(ac)
+    logger.setup_pytorch_saver({
+        'ac': ac, 
+        'log_alpha': log_alpha, 
+        'optim_pi': pi_optimizer, 
+        'optim_q': q_optimizer, 
+        'optim_alpha': alpha_optimizer,
+        'replay_buffer': replay_buffer})
 
     def update(data):
         # First run one gradient descent step for Q1 and Q2
@@ -408,7 +413,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                 
             # Update handling
             if total_steps >= update_after:
-                for j in range((num_tasks * TASK_HORIZON)/10): # Ratio of 1 training step per 10 timesteps
+                for j in range((num_tasks * TASK_HORIZON)/2): # Ratio of 1 training step per 2 timesteps
                     batch = replay_buffer.sample_batch(batch_size)
                     update(data=batch)
 

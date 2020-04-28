@@ -18,7 +18,7 @@ if __name__ == '__main__':
     eg = ExperimentGrid(name='superpos_sac-MT10_with_bias_%s_context_q_%s' % (args.psp_type, hidden_sizes_name))
     eg.add('env_name', 'MT10Helper-v0', '', True)
     eg.add('num_tasks', 10)
-    eg.add('batch_size', 128 * NUM_TASKS)
+    eg.add('batch_size', 128) # This is per task, so real is 128 x 10
     eg.add('psp_type', args.psp_type)
     eg.add('seed', [10*i for i in range(args.num_runs)])
     eg.add('epochs', 300)
