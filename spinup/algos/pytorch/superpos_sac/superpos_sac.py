@@ -92,7 +92,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, target_entropy=None, batch_size=128, start_steps=10000, 
         update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
-        logger_kwargs=dict(), save_freq=100):
+        logger_kwargs=dict(), save_freq=50):
     """
     Soft Actor-Critic (SAC)
 
@@ -198,9 +198,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    env, test_env = env_fn(), env_fn()
-    obs_dim = env.observation_space.shape
-    act_dim = env.action_space.shape[0]
+    #env, test_env = env_fn(), env_fn()
 
     # Creating vectorized batch of envs
     envs = []
@@ -208,6 +206,8 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         env = env_fn()
         env.set_task(i)
         envs.append(env)
+    obs_dim = env[0].observation_space.shape
+    act_dim = env[0].action_space.shape[0]
 
     # Action limit for clamping: critically, assumes all dimensions share the same bound!
     act_limit = env.action_space.high[0]
@@ -502,7 +502,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # End of epoch handling
         # Save model
         if (epoch % save_freq == 0) or (epoch == epochs):
-            logger.save_state({'env': env}, None)
+            logger.save_state({'env': env, 'epoch': epoch, }, None)
 
         # Test the performance of the deterministic version of the agent.
         #test_agent()
