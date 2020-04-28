@@ -260,7 +260,7 @@ class Logger:
             fname = osp.join(fpath, fname)
             os.makedirs(fpath, exist_ok=True)
             state_dicts = {}
-            for key, value in self.pytorch_saver_elements:
+            for key, value in self.pytorch_saver_elements.items():
                 if hasattr(value, 'state_dict'):
                     state_dicts[key] = value.state_dict()
                 else:

@@ -23,6 +23,7 @@ if __name__ == '__main__':
     eg.add('seed', [10*i for i in range(args.num_runs)])
     eg.add('epochs', 300)
     eg.add('steps_per_epoch', TASK_HORIZON * PATHS_PER_TASK * NUM_TASKS) 
+    eg.add('update_after', TASK_HORIZON * NUM_TASKS) 
     eg.add('lr', [3e-4])
     eg.add('start_steps', 1000)
     #eg.add('update_every', NUM_TASKS * )

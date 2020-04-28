@@ -45,26 +45,38 @@ class ReplayBuffer:
         return {k: torch.as_tensor(v, dtype=torch.float32).cuda() for k,v in batch.items()}
 
 class MultiTaskReplayBuffer(ReplayBuffer):
+    """
+    Maintains ``num_tasks`` separate replay buffers of size ``size`` each
+    """
     def __init__(self, obs_dim, act_dim, size, num_tasks):
-        self.obs_buf = torch.zeros(core.combined_shape(num_tasks, size, obs_dim), dtype=torch.float32)
-        self.obs2_buf = torch.zeros(core.combined_shape(num_tasks, size, obs_dim), dtype=torch.float32)
-        self.act_buf = torch.zeros(core.combined_shape(num_tasks, size, act_dim), dtype=torch.float32)
+        self.obs_buf = torch.zeros(core.multi_task_combined_shape(num_tasks, size, obs_dim), dtype=torch.float32)
+        self.obs2_buf = torch.zeros(core.multi_task_combined_shape(num_tasks, size, obs_dim), dtype=torch.float32)
+        self.act_buf = torch.zeros(core.multi_task_combined_shape(num_tasks, size, act_dim), dtype=torch.float32)
         self.rew_buf = torch.zeros(core.combined_shape(num_tasks, size), dtype=torch.float32)
         self.done_buf = torch.zeros(core.combined_shape(num_tasks, size), dtype=torch.float32)
-        self.ptr = torch.zeros(core.combined_shape(num_tasks), dtype=torch.int32)
+        self.ptr = torch.zeros(core.combined_shape(num_tasks), dtype=torch.long)
         self.size, self.max_size = 0, size * num_tasks
         self.num_tasks = num_tasks
 
     def store(self, obs, act, rew, next_obs, done, task):
-        self.obs_buf[task, self.ptr] = torch.from_numpy(obs)
-        self.obs2_buf[task, self.ptr] = torch.from_numpy(next_obs)
-        self.act_buf[task, self.ptr] = torch.from_numpy(act)
-        self.rew_buf[task, self.ptr] = torch.from_numpy(rew)
-        self.done_buf[task, self.ptr] = torch.from_numpy(done)
+        self.obs_buf[task, self.ptr[task]] = torch.from_numpy(obs)
+        self.obs2_buf[task, self.ptr[task]] = torch.from_numpy(next_obs)
+        self.act_buf[task, self.ptr[task]] = torch.from_numpy(act)
+        self.rew_buf[task, self.ptr[task]] = rew
+        self.done_buf[task, self.ptr[task]] = done
         self.ptr[task] = (self.ptr[task] + 1) % self.max_size
         self.size = min(self.size+1, self.max_size)
     
-    def sample_batch(self, batch_size=32):
+    def batched_store(self, obs, act, rew, next_obs, done):
+        self.obs_buf[:, self.ptr] = torch.from_numpy(obs)
+        self.obs2_buf[:, self.ptr] = torch.from_numpy(next_obs)
+        self.act_buf[:, self.ptr] = torch.from_numpy(act)
+        self.rew_buf[:, self.ptr] = torch.from_numpy(rew)
+        self.done_buf[:, self.ptr] = torch.from_numpy(done)
+        self.ptr = torch.fmod(self.ptr + 1, self.max_size)
+        self.size = min(self.size+self.num_tasks, self.max_size)
+
+    def sample_batch(self, batch_size=32, separate_by_task=False):
         # Returns a (batch_size * num_tasks) x dim dict of tensors
         idxs = np.random.randint(0, self.size, size=batch_size)
         batch = dict(obs=self.obs_buf[:, idxs],
@@ -72,12 +84,14 @@ class MultiTaskReplayBuffer(ReplayBuffer):
                      act=self.act_buf[:, idxs],
                      rew=self.rew_buf[:, idxs],
                      done=self.done_buf[:, idxs])
+        if separate_by_task:
+            return {k: v.cuda() for k,v in batch.items()}
         return {k: v.view(self.num_tasks * batch_size, -1).cuda() for k,v in batch.items()}
 
 def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, target_entropy=None, batch_size=128, start_steps=10000, 
-        update_after=None, update_every=50, num_test_episodes=10, max_ep_len=1000, 
+        update_after=1000, update_every=50, num_test_episodes=10, max_ep_len=1000, 
         logger_kwargs=dict(), save_freq=100):
     """
     Soft Actor-Critic (SAC)
@@ -188,7 +202,12 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape[0]
 
-    update_after = num_tasks * steps_per_epoch
+    # Creating vectorized batch of envs
+    envs = []
+    for i in range(num_tasks):
+        env = env_fn()
+        env.set_task(i)
+        envs.append(env)
 
     # Action limit for clamping: critically, assumes all dimensions share the same bound!
     act_limit = env.action_space.high[0]
@@ -205,10 +224,10 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     q_params = itertools.chain(ac.q1.parameters(), ac.q2.parameters())
 
     # Experience buffer
-    replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
+    replay_buffer = MultiTaskReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size, num_tasks=num_tasks)
 
     # Learned Log_Alpha
-    log_alpha = torch.zeros((num_tasks, ), requires_grad=True, device="cuda")
+    log_alpha = torch.zeros((num_tasks, 1), requires_grad=True, device="cuda")
 
     # Alpha Optimizer
     alpha_optimizer = Adam([log_alpha], lr=lr)
@@ -318,7 +337,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # Next run one gradient descent step for pi and alpha.
         loss_pi, loss_alpha, pi_info = compute_loss_pi(data)
         alpha_optimizer.zero_grad()
-        alpha_optimizer.backward()
+        loss_alpha.backward()
         alpha_optimizer.step()
         pi_optimizer.zero_grad()
         loss_pi.backward()
@@ -341,6 +360,10 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
 
     def get_action(o, deterministic=False):
         return ac.act(torch.as_tensor(o, dtype=torch.float32).cuda(), 
+                      deterministic)
+    
+    def get_batched_action(o, deterministic=False):
+        return ac.batched_act(torch.as_tensor(np.array(o), dtype=torch.float32).cuda(), 
                       deterministic)
 
     def test_agent():
@@ -373,49 +396,107 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     for epoch in range(epochs):
         steps_before = total_steps
         while (total_steps - steps_before) < steps_per_epoch:
-            for task in range(num_tasks):
-                o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
-                import pdb; pdb.set_trace()
-                for step in range(TASK_HORIZON):
+            obs = []
+            ep_rets = []
+            ep_lens = []
+            successes = []
+            for (i, env) in enumerate(envs):
+                o, ep_ret, ep_len, success = env.reset(task=i), 0, 0, False
+                obs.append(o)
+                ep_rets.append(ep_ret)
+                ep_lens.append(ep_len)
+                successes.append(success)
+            dones = [False for i in range(num_tasks)] 
+            for step in range(TASK_HORIZON):
                     # Until start_steps have elapsed, randomly sample actions
                     # from a uniform distribution for better exploration. Afterwards, 
                     # use the learned policy. 
                     if total_steps > start_steps:
-                        a = get_action(o)
+                        action = get_batched_action(obs)
                     else:
-                        a = env.action_space.sample()
+                        action = [env.action_space.sample() for env in envs]
+
 
                     # Step the env
-                    o2, r, d, info = env.step(a)
-                    ep_ret += r
-                    ep_len += 1
-
-                    # Ignore the "done" signal if it comes from hitting the time
-                    # horizon (that is, when it's an artificial terminal signal
-                    # that isn't based on the agent's state)
-                    d = False if ep_len==max_ep_len else d
+                    r_s = []
+                    obs_2 = []
+                    infos = []
+                    for (i, env) in enumerate(envs):
+                        o2, r, d, info = env.step(action[i])
+                        obs_2.append(o2)
+                        r_s.append(r)
+                        infos.append(info)
+                        ep_rets[i] += r
+                        ep_lens[i] += 1
+                        # Ignore the "done" signal if it comes from hitting the time
+                        # horizon (that is, when it's an artificial terminal signal
+                        # that isn't based on the agent's state)
+                        dones[i] = False if ep_lens[i]==max_ep_len else d
 
                     # Store experience to replay buffer
-                    replay_buffer.store(o, a, r, o2, d, task)
+                    replay_buffer.batched_store(
+                        np.array(obs, np.float32).reshape(num_tasks, 1, -1), 
+                        np.array(action, np.float32).reshape(num_tasks, 1, -1), 
+                        np.array(r_s, np.float32).reshape(num_tasks, 1), 
+                        np.array(obs_2, np.float32).reshape(num_tasks, 1, -1), 
+                        np.array(dones, np.float32).reshape(num_tasks, 1),
+                        )
 
                     # Super critical, easy to overlook step: make sure to update 
                     # most recent observation!
-                    o = o2
+                    obs = obs_2
 
                     # End of trajectory handling
-                    if 'success' in info:
-                        success = info['success'] or success
-                    if d or (ep_len == max_ep_len):
-                        logger.store(EpRet=ep_ret, EpLen=ep_len, EpSuccess=success)
-                        o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+                    for (i, env) in enumerate(envs):
+                        if 'success' in infos[i]:
+                            successes[i] = infos[i]['success'] or successes[i]
+                        if dones[i] or (ep_lens[i] == max_ep_len):
+                            logger.store(EpRet=ep_rets[i], EpLen=ep_lens[i], EpSuccess=successes[i])
+                            obs[i], ep_rets[i], ep_lens[i], successes[i] = env.reset(task=i), 0, 0, False
+                    total_steps += (1 * num_tasks)
+                
+            #for task in range(num_tasks):
+            #    o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+            #    for step in range(TASK_HORIZON):
+            #        # Until start_steps have elapsed, randomly sample actions
+            #        # from a uniform distribution for better exploration. Afterwards, 
+            #        # use the learned policy. 
+            #        if total_steps > start_steps:
+            #            a = get_action(o)
+            #        else:
+            #            a = env.action_space.sample()
 
-                    total_steps += 1
+            #        # Step the env
+            #        o2, r, d, info = env.step(a)
+            #        ep_ret += r
+            #        ep_len += 1
+
+            #        # Ignore the "done" signal if it comes from hitting the time
+            #        # horizon (that is, when it's an artificial terminal signal
+            #        # that isn't based on the agent's state)
+            #        d = False if ep_len==max_ep_len else d
+
+            #        # Store experience to replay buffer
+            #        replay_buffer.store(o, a, r, o2, d, task)
+
+            #        # Super critical, easy to overlook step: make sure to update 
+            #        # most recent observation!
+            #        o = o2
+
+            #        # End of trajectory handling
+            #        if 'success' in info:
+            #            success = info['success'] or success
+            #        if d or (ep_len == max_ep_len):
+            #            logger.store(EpRet=ep_ret, EpLen=ep_len, EpSuccess=success)
+            #            o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+
+            #        total_steps += 1
 
                 
             # Update handling
             if total_steps >= update_after:
-                for j in range((num_tasks * TASK_HORIZON)/2): # Ratio of 1 training step per 2 timesteps
-                    batch = replay_buffer.sample_batch(batch_size)
+                for j in range(int((num_tasks * TASK_HORIZON)/2)): # Ratio of 1 training step per 2 timesteps
+                    batch = replay_buffer.sample_batch(batch_size, separate_by_task=True)
                     update(data=batch)
 
         # End of epoch handling
@@ -429,9 +510,10 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
         logger.log_tabular('EpRet', with_min_and_max=True)
-        logger.log_tabular('TestEpRet', with_min_and_max=True)
+        #logger.log_tabular('TestEpRet', with_min_and_max=True)
         logger.log_tabular('EpLen', average_only=True)
-        logger.log_tabular('TestEpLen', average_only=True)
+        logger.log_tabular('EpSuccess', with_min_and_max=True)
+        #logger.log_tabular('TestEpLen', average_only=True)
         #if 'TestGoalDist' in logger.epoch_dict:
         #    logger.log_tabular('TestGoalDist', with_min_and_max=True)
         #if 'TestReachDist' in logger.epoch_dict:
@@ -451,7 +533,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
             for module in module_list:
                 if hasattr(module, "o"):
                     for task in range(num_tasks):
-                        writer.add_histogram(str(task) + "/" + name, module.o[task].cpu().detach().cpu().numpy(), global_step=t)
+                        writer.add_histogram(str(task) + "/" + name, module.o[task].cpu().detach().cpu().numpy(), global_step=total_steps)
         if epoch % 10 == 0:
             write_context_info(ac.pi.net, "pi")
             write_context_info(ac.q1.q, "q1")

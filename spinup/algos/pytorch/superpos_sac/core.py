@@ -112,6 +112,11 @@ def combined_shape(length, shape=None):
         return (length,)
     return (length, shape) if np.isscalar(shape) else (length, *shape)
 
+def multi_task_combined_shape(outer_dim, length, shape=None):
+    if shape is None:
+        return (outer_dim, length,)
+    return (outer_dim, length, shape) if np.isscalar(shape) else (outer_dim, length, *shape)
+
 def mlp(sizes, activation, output_activation=nn.Identity):
     layers = []
     for j in range(len(sizes)-1):
@@ -198,7 +203,7 @@ class SquashedGaussianMLPActor(nn.Module):
             # and look in appendix C. This is a more numerically-stable equivalent to Eq 21.
             # Try deriving it yourself as a (very difficult) exercise. :)
             logp_pi = pi_distribution.log_prob(pi_action).sum(axis=-1)
-            logp_pi -= (2*(np.log(2) - pi_action - F.softplus(-2*pi_action))).sum(axis=1)
+            logp_pi -= (2*(np.log(2) - pi_action - F.softplus(-2*pi_action))).sum(axis=-1)
         else:
             logp_pi = None
 
@@ -273,8 +278,8 @@ class MLPActorCritic(nn.Module):
         self.q1 = MLPQFunction(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation, psp_type)
         self.q2 = MLPQFunction(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation, psp_type)
 
+        self.psp_type = psp_type
         ## build context proposal function
-        #self.psp_type = psp_type
         #if psp_type == 'Proposed':
         #    self.context_gen = ContextGenerator(num_tasks, obs_dim - num_tasks, act_dim, hidden_sizes, activation)
 
@@ -286,3 +291,12 @@ class MLPActorCritic(nn.Module):
             else:
                 a, _ = self.pi(obs.unsqueeze(0), deterministic, False)
             return a.squeeze(0).cpu().detach().numpy()
+
+    def batched_act(self, obs, deterministic=False):
+        with torch.no_grad():
+            if self.psp_type == 'Proposed':
+                context_list = self.context_gen(obs)
+                a, _ = self.pi(obs, deterministic, False, context=context_list['Pi'])
+            else:
+                a, _ = self.pi(obs, deterministic, False)
+            return a.cpu().detach().numpy()
