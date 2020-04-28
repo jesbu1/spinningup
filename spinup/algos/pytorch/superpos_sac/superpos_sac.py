@@ -208,7 +208,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
 
     # Learned Log_Alpha
-    log_alpha = torch.zeros((num_tasks, ), requires_grad=True).cuda()
+    log_alpha = torch.zeros((num_tasks, ), requires_grad=True, device="cuda")
 
     # Alpha Optimizer
     alpha_optimizer = Adam([log_alpha], lr=lr)
@@ -374,7 +374,8 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         steps_before = total_steps
         while (total_steps - steps_before) < steps_per_epoch:
             for task in range(num_tasks):
-                o, ep_ret, ep_len, success = env.reset_with_task(task), 0, False, 0
+                o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+                import pdb; pdb.set_trace()
                 for step in range(TASK_HORIZON):
                     # Until start_steps have elapsed, randomly sample actions
                     # from a uniform distribution for better exploration. Afterwards, 
@@ -406,7 +407,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                         success = info['success'] or success
                     if d or (ep_len == max_ep_len):
                         logger.store(EpRet=ep_ret, EpLen=ep_len, EpSuccess=success)
-                        o, ep_ret, ep_len = env.reset(), 0, 0
+                        o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
 
                     total_steps += 1
 
