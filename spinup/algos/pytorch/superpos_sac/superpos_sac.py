@@ -502,7 +502,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # End of epoch handling
         # Save model
         if (epoch % save_freq == 0) or (epoch == epochs):
-            logger.save_state({'env': env, 'epoch': epoch, }, None)
+            logger.save_state({'envs' : envs, 'epoch': epoch, 'total_steps':total_steps}, None)
 
         # Test the performance of the deterministic version of the agent.
         #test_agent()
