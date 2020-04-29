@@ -210,7 +210,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     act_dim = env.action_space.shape[0]
 
     # Action limit for clamping: critically, assumes all dimensions share the same bound!
-    act_limit = envs.action_space.high[0]
+    act_limit = env.action_space.high[0]
 
     # Create actor-critic module and target networks
     ac = actor_critic(num_tasks, env.observation_space, env.action_space, psp_type, **ac_kwargs).cuda()
