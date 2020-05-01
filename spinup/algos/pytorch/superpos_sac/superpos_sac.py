@@ -546,24 +546,36 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
 
 
 if __name__ == '__main__':
+    TASK_HORIZON = 200
+    PATHS_PER_TASK = 3
+    NUM_TASKS = 10
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
+    parser.add_argument('--env', type=str, default='MT10Helper-v0')
     parser.add_argument('--hid', type=int, default=256)
-    parser.add_argument('--l', type=int, default=2)
+    parser.add_argument('--l', type=int, default=5)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--exp_name', type=str, default='sac')
+    parser.add_argument('--epochs', type=int, default=900)
+    parser.add_argument('--batch_size', type=int, default=128) # real is 128 x 10
+    parser.add_argument('--lr', type=float, default=3e-4) # real is 128 x 10
+    parser.add_argument('--epochs', type=int, default=900)
+    #eg = ExperimentGrid(name='superpos_sac-MT10_with_bias_%s_context_q_%s' % (args.psp_type, hidden_sizes_name))
     parser.add_argument('--psp_type', type=str, default='Rand')
     args = parser.parse_args()
 
     from spinup.utils.run_utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+    exp_name = 'superpos_sac-MT10_with_bias_%s_context_q_%s' % (args.psp_type, str(tuple([args.hid] * args.l)))
+    logger_kwargs = setup_logger_kwargs(exp_name, args.seed)
 
     torch.set_num_threads(torch.get_num_threads())
 
-    superpos_sac(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic, psp_type=args.psp_type,
-        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
-        gamma=args.gamma, seed=args.seed, epochs=args.epochs,
+
+    steps_per_epoch = TASK_HORIZON * PATHS_PER_TASK * NUM_TASKS
+
+    superpos_sac(lambda : gym.make(args.env), num_tasks=args.num_tasks, actor_critic=core.MLPActorCritic, psp_type=args.psp_type,
+        seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=args.epochs, lr=args.lr, batch_size=args.batch_size, update_after=TASK_HORIZON * NUM_TASKS,
+        num_test_episodes=NUM_TASKS * 10,
+        start_steps=1000, max_ep_len=TASK_HORIZON,
+        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l, activation=torch.nn.ReLU), 
         logger_kwargs=logger_kwargs)
