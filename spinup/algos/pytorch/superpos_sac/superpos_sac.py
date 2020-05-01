@@ -199,6 +199,8 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     np.random.seed(seed)
 
     env, test_env = env_fn(), env_fn()
+    #from metaworld.benchmarks import MT40
+    #test_env = MT40.get_train_tasks()
 
     # Creating vectorized batch of envs
     #envs = []
@@ -495,7 +497,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                 
             # Update handling
             if total_steps >= update_after:
-                for j in range(int((num_tasks * TASK_HORIZON)/2)): # Ratio of 1 training step per 2 timesteps
+                for j in range(int((num_tasks * TASK_HORIZON)/1)): # Ratio of 1 training step per 1 timesteps
                     batch = replay_buffer.sample_batch(batch_size, separate_by_task=True)
                     update(data=batch)
 
@@ -511,9 +513,9 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
         logger.log_tabular('EpRet', with_min_and_max=True)
-        #logger.log_tabular('TestEpRet', with_min_and_max=True)
         logger.log_tabular('EpLen', average_only=True)
         logger.log_tabular('EpSuccess', with_min_and_max=True)
+        #logger.log_tabular('TestEpRet', with_min_and_max=True)
         #logger.log_tabular('TestEpLen', average_only=True)
         #if 'TestGoalDist' in logger.epoch_dict:
         #    logger.log_tabular('TestGoalDist', with_min_and_max=True)

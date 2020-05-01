@@ -15,7 +15,8 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_sizes', type=int, nargs='+', default=(160, 160, 160, 160, 160))
     args = parser.parse_args()
     hidden_sizes_name = '_'.join([str(num) for num in args.hidden_sizes])
-    eg = ExperimentGrid(name='superpos_sac-MT10_with_bias_%s_context_q_%s' % (args.psp_type, hidden_sizes_name))
+    #eg = ExperimentGrid(name='superpos_sac-MT10_with_bias_%s_context_q_%s' % (args.psp_type, hidden_sizes_name))
+    eg = ExperimentGrid(name='TIMETEST')
     eg.add('env_name', 'MT10Helper-v0', '', True)
     eg.add('num_tasks', 10)
     eg.add('batch_size', 128) # This is per task, so real is 128 x 10
