@@ -352,7 +352,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
 
         # Record things
         logger.store(LossPi=loss_pi.item(), **pi_info)
-        logger.store(LossAlpha=loss_alpha.item(), **pi_info)
+        logger.store(LossAlpha=loss_alpha.item())
 
         # Finally, update target networks by polyak averaging.
         with torch.no_grad():
