@@ -268,7 +268,8 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
             q1_pi_targ = ac_targ.q1(o2, a2)
             q2_pi_targ = ac_targ.q2(o2, a2)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ)
-            backup = r + gamma * (1 - d) * (q_pi_targ - log_alpha.exp() * logp_a2)
+            #backup = r + gamma * (1 - d) * (q_pi_targ - log_alpha.exp() * logp_a2)
+            backup = r + gamma * (1 - d) * (q_pi_targ - logp_a2)
 
         # MSE loss against Bellman backup
         loss_q1 = ((q1 - backup)**2).mean()
@@ -351,6 +352,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
 
         # Record things
         logger.store(LossPi=loss_pi.item(), **pi_info)
+        logger.store(LossAlpha=loss_alpha.item(), **pi_info)
 
         # Finally, update target networks by polyak averaging.
         with torch.no_grad():
@@ -528,6 +530,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         logger.log_tabular('Q2Vals', with_min_and_max=True)
         logger.log_tabular('LogPi', with_min_and_max=True)
         logger.log_tabular('LossPi', average_only=True)
+        logger.log_tabular('LossAlpha', average_only=True)
         logger.log_tabular('LossQ', average_only=True)
         logger.log_tabular('Time', time.time()-start_time)
         logger.dump_tabular()
