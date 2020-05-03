@@ -11,7 +11,7 @@ from spinup.utils.logx import EpochLogger
 from torch.utils.tensorboard import SummaryWriter
 
 
-TASK_HORIZON = 200
+TASK_HORIZON = 150
 
 class ReplayBuffer:
     """
