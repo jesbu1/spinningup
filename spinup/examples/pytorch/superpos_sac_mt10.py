@@ -22,7 +22,7 @@ if __name__ == '__main__':
     eg.add('batch_size', 128) # This is per task, so real is 128 x 10
     eg.add('psp_type', args.psp_type)
     eg.add('seed', [10*i for i in range(args.num_runs)])
-    eg.add('epochs', 900)
+    eg.add('epochs', 1000)
     eg.add('steps_per_epoch', TASK_HORIZON * PATHS_PER_TASK * NUM_TASKS) 
     eg.add('update_after', TASK_HORIZON * NUM_TASKS) 
     eg.add('lr', [1e-4])
