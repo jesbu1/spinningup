@@ -55,7 +55,7 @@ class MultiTaskReplayBuffer(ReplayBuffer):
         self.rew_buf = torch.zeros(core.combined_shape(num_tasks, size), dtype=torch.float32)
         self.done_buf = torch.zeros(core.combined_shape(num_tasks, size), dtype=torch.float32)
         self.ptr = torch.zeros(core.combined_shape(num_tasks), dtype=torch.long)
-        self.size, self.max_size = 0, size * num_tasks
+        self.size, self.max_size = 0, size
         self.num_tasks = num_tasks
 
     def store(self, obs, act, rew, next_obs, done, task):
@@ -192,23 +192,25 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
             the current policy and value function.
 
     """
-
+    BATCHED = True
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
 
     torch.manual_seed(seed)
     np.random.seed(seed)
-
-    env, test_env = env_fn(), env_fn()
+    
+    if not BATCHED:
+        env, test_env = env_fn(), env_fn()
     #from metaworld.benchmarks import MT40
     #test_env = MT40.get_train_tasks()
 
-    # Creating vectorized batch of envs
-    #envs = []
-    #for i in range(num_tasks):
-    #    env = env_fn()
-    #    env.set_task(i)
-    #    envs.append(env)
+    else:
+        # Creating vectorized batch of envs
+        envs = []
+        for i in range(num_tasks):
+            env = env_fn()
+            env.set_task(i)
+            envs.append(env)
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape[0]
 
@@ -406,103 +408,104 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
     for epoch in range(epochs):
         steps_before = total_steps
         while (total_steps - steps_before) < steps_per_epoch:
-            #obs = []
-            #ep_rets = []
-            #ep_lens = []
-            #successes = []
-            #for (i, env) in enumerate(envs):
-            #    o, ep_ret, ep_len, success = env.reset(task=i), 0, 0, False
-            #    obs.append(o)
-            #    ep_rets.append(ep_ret)
-            #    ep_lens.append(ep_len)
-            #    successes.append(success)
-            #dones = [False for i in range(num_tasks)] 
-            #for step in range(TASK_HORIZON):
-            #    # Until start_steps have elapsed, randomly sample actions
-            #    # from a uniform distribution for better exploration. Afterwards, 
-            #    # use the learned policy. 
-            #    if total_steps > start_steps:
-            #        action = get_batched_action(obs)
-            #    else:
-            #        action = [env.action_space.sample() for env in envs]
-
-
-            #    # Step the env
-            #    r_s = []
-            #    obs_2 = []
-            #    infos = []
-            #    for (i, env) in enumerate(envs):
-            #        o2, r, d, info = env.step(action[i])
-            #        obs_2.append(o2)
-            #        r_s.append(r)
-            #        infos.append(info)
-            #        ep_rets[i] += r
-            #        ep_lens[i] += 1
-            #        # Ignore the "done" signal if it comes from hitting the time
-            #        # horizon (that is, when it's an artificial terminal signal
-            #        # that isn't based on the agent's state)
-            #        dones[i] = False if ep_lens[i]==max_ep_len else d
-
-            #    # Store experience to replay buffer
-            #    replay_buffer.batched_store(
-            #        np.array(obs, np.float32).reshape(num_tasks, 1, -1), 
-            #        np.array(action, np.float32).reshape(num_tasks, 1, -1), 
-            #        np.array(r_s, np.float32).reshape(num_tasks, 1), 
-            #        np.array(obs_2, np.float32).reshape(num_tasks, 1, -1), 
-            #        np.array(dones, np.float32).reshape(num_tasks, 1),
-            #        )
-
-            #    # Super critical, easy to overlook step: make sure to update 
-            #    # most recent observation!
-            #    obs = obs_2
-
-            #    # End of trajectory handling
-            #    for (i, env) in enumerate(envs):
-            #        if 'success' in infos[i]:
-            #            successes[i] = infos[i]['success'] or successes[i]
-            #        if dones[i] or (ep_lens[i] == max_ep_len):
-            #            logger.store(EpRet=ep_rets[i], EpLen=ep_lens[i], EpSuccess=successes[i])
-            #            obs[i], ep_rets[i], ep_lens[i], successes[i] = env.reset(task=i), 0, 0, False
-            #    total_steps += (1 * num_tasks)
-                
-            for task in range(num_tasks):
-                o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+            if BATCHED:
+                obs = []
+                ep_rets = []
+                ep_lens = []
+                successes = []
+                for (i, env) in enumerate(envs):
+                    o, ep_ret, ep_len, success = env.reset(task=i), 0, 0, False
+                    obs.append(o)
+                    ep_rets.append(ep_ret)
+                    ep_lens.append(ep_len)
+                    successes.append(success)
+                dones = [False for i in range(num_tasks)] 
                 for step in range(TASK_HORIZON):
                     # Until start_steps have elapsed, randomly sample actions
                     # from a uniform distribution for better exploration. Afterwards, 
                     # use the learned policy. 
                     if total_steps > start_steps:
-                        a = get_action(o)
+                        action = get_batched_action(obs)
                     else:
-                        a = env.action_space.sample()
+                        action = [env.action_space.sample() for env in envs]
+
 
                     # Step the env
-                    o2, r, d, info = env.step(a)
-                    ep_ret += r
-                    ep_len += 1
-
-                    # Ignore the "done" signal if it comes from hitting the time
-                    # horizon (that is, when it's an artificial terminal signal
-                    # that isn't based on the agent's state)
-                    d = False if ep_len==max_ep_len else d
+                    r_s = []
+                    obs_2 = []
+                    infos = []
+                    for (i, env) in enumerate(envs):
+                        o2, r, d, info = env.step(action[i])
+                        obs_2.append(o2)
+                        r_s.append(r)
+                        infos.append(info)
+                        ep_rets[i] += r
+                        ep_lens[i] += 1
+                        # Ignore the "done" signal if it comes from hitting the time
+                        # horizon (that is, when it's an artificial terminal signal
+                        # that isn't based on the agent's state)
+                        dones[i] = False if ep_lens[i]==max_ep_len else d
 
                     # Store experience to replay buffer
-                    replay_buffer.store(o, a, r, o2, d, task)
+                    replay_buffer.batched_store(
+                        np.array(obs, np.float32).reshape(num_tasks, 1, -1), 
+                        np.array(action, np.float32).reshape(num_tasks, 1, -1), 
+                        np.array(r_s, np.float32).reshape(num_tasks, 1), 
+                        np.array(obs_2, np.float32).reshape(num_tasks, 1, -1), 
+                        np.array(dones, np.float32).reshape(num_tasks, 1),
+                        )
 
                     # Super critical, easy to overlook step: make sure to update 
                     # most recent observation!
-                    o = o2
+                    obs = obs_2
 
                     # End of trajectory handling
-                    if 'success' in info:
-                        success = info['success'] or success
-                    if d or (ep_len == max_ep_len):
-                        logger.store(EpRet=ep_ret, EpLen=ep_len, EpSuccess=success)
-                        o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+                    for (i, env) in enumerate(envs):
+                        if 'success' in infos[i]:
+                            successes[i] = infos[i]['success'] or successes[i]
+                        if dones[i] or (ep_lens[i] == max_ep_len):
+                            logger.store(EpRet=ep_rets[i], EpLen=ep_lens[i], EpSuccess=successes[i])
+                            obs[i], ep_rets[i], ep_lens[i], successes[i] = env.reset(task=i), 0, 0, False
+                    total_steps += (1 * num_tasks)
+            else:
+                for task in range(num_tasks):
+                    o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+                    for step in range(TASK_HORIZON):
+                        # Until start_steps have elapsed, randomly sample actions
+                        # from a uniform distribution for better exploration. Afterwards, 
+                        # use the learned policy. 
+                        if total_steps > start_steps:
+                            a = get_action(o)
+                        else:
+                            a = env.action_space.sample()
 
-                    total_steps += 1
+                        # Step the env
+                        o2, r, d, info = env.step(a)
+                        ep_ret += r
+                        ep_len += 1
 
-                
+                        # Ignore the "done" signal if it comes from hitting the time
+                        # horizon (that is, when it's an artificial terminal signal
+                        # that isn't based on the agent's state)
+                        d = False if ep_len==max_ep_len else d
+
+                        # Store experience to replay buffer
+                        replay_buffer.store(o, a, r, o2, d, task)
+
+                        # Super critical, easy to overlook step: make sure to update 
+                        # most recent observation!
+                        o = o2
+
+                        # End of trajectory handling
+                        if 'success' in info:
+                            success = info['success'] or success
+                        if d or (ep_len == max_ep_len):
+                            logger.store(EpRet=ep_ret, EpLen=ep_len, EpSuccess=success)
+                            o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
+
+                        total_steps += 1
+
+                    
             # Update handling
             if total_steps >= update_after:
                 for j in range(int((num_tasks * TASK_HORIZON)/2)): # Ratio of 1 training step per 2 timesteps
