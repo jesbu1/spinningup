@@ -303,9 +303,8 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # Compute alpha loss
         loss_alpha = -(log_alpha_corrected_task * (logp_pi + target_entropy).detach()).mean()
         
-        log_alpha_corrected_task = torch.matmul(o[..., -num_tasks:].detach(), log_alpha)
         # Entropy-regularized policy loss
-        loss_pi = (log_alpha_corrected_task.exp() * logp_pi - q_pi).mean()
+        loss_pi = (log_alpha_corrected_task.detach().exp() * logp_pi - q_pi).mean()
 
         # Useful info for logging
         pi_info = dict(LogPi=logp_pi.cpu().detach().numpy())
