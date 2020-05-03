@@ -506,9 +506,9 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                 
             # Update handling
             if total_steps >= update_after:
-                #for j in range(int((num_tasks * TASK_HORIZON)/1)): # Ratio of 1 training step per 1 timesteps
-                batch = replay_buffer.sample_batch(batch_size)
-                update(data=batch)
+                for j in range(int((num_tasks * TASK_HORIZON)/1)): # Ratio of 1 training step per 1 timesteps
+                    batch = replay_buffer.sample_batch(batch_size)
+                    update(data=batch)
 
         # End of epoch handling
         # Save model
