@@ -270,7 +270,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
             q2_pi_targ = ac_targ.q2(o2, a2)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ)
 
-            log_alpha_corrected_task = torch.matmul(o[-num_tasks:], log_alpha)
+            log_alpha_corrected_task = torch.matmul(o[..., -num_tasks:], log_alpha)
 
             backup = r + gamma * (1 - d) * (q_pi_targ - log_alpha_corrected_task.exp() * logp_a2)
             #backup = r + gamma * (1 - d) * (q_pi_targ - logp_a2)
@@ -298,7 +298,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         q2_pi = ac.q2(o, pi)
         q_pi = torch.min(q1_pi, q2_pi)
 
-        log_alpha_corrected_task = torch.matmul(o[-num_tasks:], log_alpha)
+        log_alpha_corrected_task = torch.matmul(o[..., -num_tasks:], log_alpha)
 
         # Compute alpha loss
         loss_alpha = -(log_alpha_corrected_task * (logp_pi + target_entropy).detach()).mean()
