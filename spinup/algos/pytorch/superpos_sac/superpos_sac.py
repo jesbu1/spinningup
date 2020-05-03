@@ -74,10 +74,11 @@ class MultiTaskReplayBuffer(ReplayBuffer):
         self.rew_buf[:, self.ptr] = torch.from_numpy(rew)
         self.done_buf[:, self.ptr] = torch.from_numpy(done)
         self.ptr = torch.fmod(self.ptr + 1, self.max_size)
-        self.size = min(self.size+self.num_tasks, self.max_size)
+        self.size = min(self.size+1, self.max_size)
 
     def sample_batch(self, batch_size=32):
         # Returns a (batch_size * num_tasks) x dim dict of tensors
+        import pdb; pdb.set_trace()
         idxs = np.random.randint(0, self.size, size=(self.num_tasks, batch_size))
         process_buffers = lambda buf: torch.cat([buf[i, idxs[i]] for i in range(self.num_tasks)], dim=0)
         batch = dict(obs=process_buffers(self.obs_buf),
@@ -301,7 +302,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         q_pi = torch.min(q1_pi, q2_pi)
 
         log_alpha_corrected_task = torch.matmul(o[..., -num_tasks:].detach(), log_alpha)
-
+        import pdb; pdb.set_trace()
         # Compute alpha loss
         loss_alpha = -(log_alpha_corrected_task * (logp_pi + target_entropy).detach()).mean()
         
@@ -465,6 +466,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                             successes[i] = infos[i]['success'] or successes[i]
                         if dones[i] or (ep_lens[i] == max_ep_len):
                             logger.store(EpRet=ep_rets[i], EpLen=ep_lens[i], EpSuccess=successes[i])
+                            logger.store(**{'SuccessTask%d' % i: successes})
                             obs[i], ep_rets[i], ep_lens[i], successes[i] = env.reset(task=i), 0, 0, False
                     total_steps += (1 * num_tasks)
             else:
@@ -515,8 +517,10 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         # End of epoch handling
         # Save model
         if (epoch % save_freq == 0) or (epoch == epochs):
-            #logger.save_state({'envs' : envs, 'epoch': epoch, 'total_steps':total_steps}, None)
-            logger.save_state({'env' : env, 'epoch': epoch, 'total_steps':total_steps}, None)
+            if BATCHED:
+                logger.save_state({'envs' : envs, 'epoch': epoch, 'total_steps':total_steps}, None)
+            else:
+                logger.save_state({'env' : env, 'epoch': epoch, 'total_steps':total_steps}, None)
 
         # Test the performance of the deterministic version of the agent.
         #test_agent()
@@ -525,7 +529,10 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         logger.log_tabular('Epoch', epoch)
         logger.log_tabular('EpRet', with_min_and_max=True)
         logger.log_tabular('EpLen', average_only=True)
-        logger.log_tabular('EpSuccess', with_min_and_max=True)
+        logger.log_tabular('EpSuccess', average_only=True)
+        if BATCHED:
+            for i in range(num_tasks):
+                logger.log_tabular('SuccessTask%d' % i, average_only=True)
         #logger.log_tabular('TestEpRet', with_min_and_max=True)
         #logger.log_tabular('TestEpLen', average_only=True)
         #if 'TestGoalDist' in logger.epoch_dict:
@@ -558,7 +565,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
 
 
 if __name__ == '__main__':
-    TASK_HORIZON = 200
+    TASK_HORIZON = 150
     PATHS_PER_TASK = 3
     NUM_TASKS = 10
     import argparse
