@@ -85,9 +85,9 @@ class MultiTaskReplayBuffer(ReplayBuffer):
                      act=process_buffers(self.act_buf),
                      rew=process_buffers(self.rew_buf),
                      done=process_buffers(self.done_buf))
-        if separate_by_task:
-            return {k: v.cuda() for k,v in batch.items()}
-        return {k: v.view(self.num_tasks * batch_size, -1).cuda() for k,v in batch.items()}
+        #if separate_by_task:
+        return {k: v.cuda() for k,v in batch.items()}
+        #return {k: v.view(self.num_tasks * batch_size, -1).cuda() for k,v in batch.items()}
 
 def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
