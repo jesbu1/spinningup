@@ -78,7 +78,6 @@ class MultiTaskReplayBuffer(ReplayBuffer):
 
     def sample_batch(self, batch_size=32):
         # Returns a (batch_size * num_tasks) x dim dict of tensors
-        import pdb; pdb.set_trace()
         idxs = np.random.randint(0, self.size, size=(self.num_tasks, batch_size))
         process_buffers = lambda buf: torch.cat([buf[i, idxs[i]] for i in range(self.num_tasks)], dim=0)
         batch = dict(obs=process_buffers(self.obs_buf),
@@ -302,7 +301,6 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         q_pi = torch.min(q1_pi, q2_pi)
 
         log_alpha_corrected_task = torch.matmul(o[..., -num_tasks:].detach(), log_alpha)
-        import pdb; pdb.set_trace()
         # Compute alpha loss
         loss_alpha = -(log_alpha_corrected_task * (logp_pi + target_entropy).detach()).mean()
         
