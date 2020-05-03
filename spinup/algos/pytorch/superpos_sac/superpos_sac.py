@@ -76,14 +76,15 @@ class MultiTaskReplayBuffer(ReplayBuffer):
         self.ptr = torch.fmod(self.ptr + 1, self.max_size)
         self.size = min(self.size+self.num_tasks, self.max_size)
 
-    def sample_batch(self, batch_size=32, separate_by_task=False):
+    def sample_batch(self, batch_size=32):
         # Returns a (batch_size * num_tasks) x dim dict of tensors
-        idxs = np.random.randint(0, self.size, size=batch_size)
-        batch = dict(obs=self.obs_buf[:, idxs],
-                     obs2=self.obs2_buf[:, idxs],
-                     act=self.act_buf[:, idxs],
-                     rew=self.rew_buf[:, idxs],
-                     done=self.done_buf[:, idxs])
+        idxs = np.random.randint(0, self.size, size=(self.num_tasks, batch_size))
+        process_buffers = lambda buf: torch.cat([buf[i, idxs[i]] for i in range(self.num_tasks)], dim=0)
+        batch = dict(obs=process_buffers(self.obs_buf),
+                     obs2=process_buffers(self.obs2_buf),
+                     act=process_buffers(self.act_buf),
+                     rew=process_buffers(self.rew_buf),
+                     done=process_buffers(self.done_buf))
         if separate_by_task:
             return {k: v.cuda() for k,v in batch.items()}
         return {k: v.view(self.num_tasks * batch_size, -1).cuda() for k,v in batch.items()}
@@ -268,8 +269,11 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
             q1_pi_targ = ac_targ.q1(o2, a2)
             q2_pi_targ = ac_targ.q2(o2, a2)
             q_pi_targ = torch.min(q1_pi_targ, q2_pi_targ)
-            #backup = r + gamma * (1 - d) * (q_pi_targ - log_alpha.exp() * logp_a2)
-            backup = r + gamma * (1 - d) * (q_pi_targ - logp_a2)
+
+            log_alpha_corrected_task = torch.matmul(o[-num_tasks:], log_alpha)
+
+            backup = r + gamma * (1 - d) * (q_pi_targ - log_alpha_corrected_task.exp() * logp_a2)
+            #backup = r + gamma * (1 - d) * (q_pi_targ - logp_a2)
 
         # MSE loss against Bellman backup
         loss_q1 = ((q1 - backup)**2).mean()
@@ -294,11 +298,13 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
         q2_pi = ac.q2(o, pi)
         q_pi = torch.min(q1_pi, q2_pi)
 
-        # Compute alpha loss
-        loss_alpha = -(log_alpha * (logp_pi + target_entropy).detach()).mean()
+        log_alpha_corrected_task = torch.matmul(o[-num_tasks:], log_alpha)
 
+        # Compute alpha loss
+        loss_alpha = -(log_alpha_corrected_task * (logp_pi + target_entropy).detach()).mean()
+        
         # Entropy-regularized policy loss
-        loss_pi = (log_alpha.exp() * logp_pi - q_pi).mean()
+        loss_pi = (log_alpha_corrected_task.exp() * logp_pi - q_pi).mean()
 
         # Useful info for logging
         pi_info = dict(LogPi=logp_pi.cpu().detach().numpy())
@@ -499,9 +505,9 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                 
             # Update handling
             if total_steps >= update_after:
-                for j in range(int((num_tasks * TASK_HORIZON)/1)): # Ratio of 1 training step per 1 timesteps
-                    batch = replay_buffer.sample_batch(batch_size, separate_by_task=True)
-                    update(data=batch)
+                #for j in range(int((num_tasks * TASK_HORIZON)/1)): # Ratio of 1 training step per 1 timesteps
+                batch = replay_buffer.sample_batch(batch_size)
+                update(data=batch)
 
         # End of epoch handling
         # Save model
