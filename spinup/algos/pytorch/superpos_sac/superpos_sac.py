@@ -464,7 +464,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                             successes[i] = infos[i]['success'] or successes[i]
                         if dones[i] or (ep_lens[i] == max_ep_len):
                             logger.store(EpRet=ep_rets[i], EpLen=ep_lens[i], EpSuccess=successes[i])
-                            logger.store(**{'SuccessTask%d' % i: successes})
+                            logger.store(**{'SuccessTask%d' % i: successes[i]})
                             obs[i], ep_rets[i], ep_lens[i], successes[i] = env.reset(task=i), 0, 0, False
                     total_steps += (1 * num_tasks)
             else:
