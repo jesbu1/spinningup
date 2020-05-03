@@ -26,7 +26,7 @@ if __name__ == '__main__':
     eg.add('steps_per_epoch', TASK_HORIZON * PATHS_PER_TASK * NUM_TASKS) 
     eg.add('update_after', TASK_HORIZON * NUM_TASKS) 
     eg.add('lr', [3e-4])
-    eg.add('start_steps', 8000)
+    eg.add('start_steps', 6000)
     #eg.add('update_every', NUM_TASKS * )
     eg.add('num_test_episodes', 10 * NUM_TASKS)
     eg.add('ac_kwargs:hidden_sizes', [tuple(args.hidden_sizes)], 'hid')
