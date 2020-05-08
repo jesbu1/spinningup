@@ -467,6 +467,12 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
                             logger.store(**{'SuccessTask%d' % i: successes[i]})
                             obs[i], ep_rets[i], ep_lens[i], successes[i] = env.reset(task=i), 0, 0, False
                     total_steps += (1 * num_tasks)
+
+                    # Update handling
+                    if total_steps >= update_after:
+                        batch = replay_buffer.sample_batch(2 * batch_size) # Ratio of 2 training steps per time step
+                        update(data=batch)
+                    """
             else:
                 for task in range(num_tasks):
                     o, ep_ret, ep_len, success = env.reset(task=task), 0, 0, False
@@ -505,12 +511,7 @@ def superpos_sac(env_fn, num_tasks, psp_type, actor_critic=core.MLPActorCritic, 
 
                         total_steps += 1
 
-                    
-            # Update handling
-            if total_steps >= update_after:
-                for j in range(int((num_tasks * TASK_HORIZON)/2)): # Ratio of 1 training step per 2 timesteps
-                    batch = replay_buffer.sample_batch(batch_size)
-                    update(data=batch)
+                        """
 
         # End of epoch handling
         # Save model
